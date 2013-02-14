@@ -340,7 +340,7 @@ class MergeNode(Node):
                     break
                 else:
                     joined = True
-                    joined_row += detail
+                    joined_row += tuple(detail)
 
             if joined:
                 self.put(joined_row)
