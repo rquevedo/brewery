@@ -217,6 +217,7 @@ class SQLDataTarget(base.DataTarget):
                     create=False, replace=False,
                     add_id_key=False, id_key_name=None,
                     buffer_size=None, fields=None, concrete_type_map=None,
+                    update_records = False,update_keys=None,update_fields=None,
                     **options):
         """Creates a relational database data target stream.
 
@@ -241,6 +242,9 @@ class SQLDataTarget(base.DataTarget):
         """
         if not options:
             options = {}
+        if update_records and not update_keys:
+            raise AttributeError("In order to update records we need " \
+                                 "the update keys.")
 
         self.url = url
         self.connection = connection
@@ -251,6 +255,9 @@ class SQLDataTarget(base.DataTarget):
         self.create = create
         self.truncate = truncate
         self.add_id_key = add_id_key
+        self.update_records = update_records
+        self.update_keys = update_keys
+        self.update_fields = update_fields
 
         self.table = None
         self.fields = fields
@@ -349,8 +356,29 @@ class SQLDataTarget(base.DataTarget):
         self._buffer.append(record)
         if len(self._buffer) >= self.buffer_size:
             self._flush()
+            
+    def get_select_command(self,dic_row):
+        self.condition_string = " and ".join(["%s=%s" % (field,dic_row[field]) for field in self.update_keys])
+        return self.table.select(self.condition_string)
 
+    def get_update_command(self,dic_row):
+        values = {}
+        self.update_fields = self.update_fields or self.field_names
+        for field in self.update_fields:
+            values[field] = dic_row[field]    
+        return self.table.update(self.condition_string, values)
+    
     def _flush(self):
         if len(self._buffer) > 0:
-            self.context.connection.execute(self.insert_command, self._buffer)
-            self._buffer = []
+            if self.update_records:
+                for dic_row in self._buffer:
+                    select_command = self.get_select_command(dic_row)
+                    select_result = self.context.connection.execute(select_command)
+                    if select_result.rowcount:
+                        update_command = self.get_update_command(dic_row)
+                        self.context.connection.execute(update_command)
+                    else:
+                        self.context.connection.execute(self.insert_command,dic_row)
+            else:
+                self.context.connection.execute(self.insert_command, self._buffer)
+                self._buffer = []
